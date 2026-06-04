@@ -45,6 +45,10 @@ private:
     int            currentAction = 0;
 
     int actionRepeatCounter = 0;
+    // Thêm biến này vào để đếm tuổi thọ của mỗi lần sống:
+    int episodeStep = 0;
+
+   
     static constexpr int ACTION_REPEAT = 5;
 
     // Episode auto-reset

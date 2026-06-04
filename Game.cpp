@@ -53,6 +53,7 @@ void Game::resetEpisode()
     prevFoodDist = 1.f;
     foodRespawnTimer = 0.f;
     enemyRespawnTimer = 0.f;
+    episodeStep = 0; // <--- THÊM DÒNG NÀY VÀO ĐÂY (Đưa tuổi thọ về 0 khi đầu thai)
 }
 
 // ── Main loop ─────────────────────────────────────────────────────────────────
@@ -194,6 +195,7 @@ void Game::update(float dt)
 {
     RewardEvent ev{};
     bool done = false;
+    episodeStep++; // <--- THÊM DÒNG NÀY VÀO ĐÂY (Cứ mỗi khung hình trôi qua là thọ thêm 1 tuổi)
 
     // ── AI or manual input ────────────────────────────────────────────────────
     if (AI_MODE && agent && !player->isDead()) {
@@ -449,7 +451,7 @@ void Game::drawAIOverlay()
 
     label("── Player AI (PPO) ──", 0, Color(140, 180, 255), 16);
     label("Episode : " + std::to_string(agent->getEpisode()), 24, Color(200, 200, 200));
-    label("Steps   : " + std::to_string(agent->getTotalSteps()), 46, Color(200, 200, 200));
+    label("Steps   : " + std::to_string(episodeStep), 46, Color(200, 200, 200));
     label("Avg Ret : " + std::to_string(agent->getAvgReward()).substr(0, 6), 68, Color(100, 240, 140));
     label("Loss    : " + std::to_string(agent->getLastLoss()).substr(0, 6), 90, Color(240, 160, 80));
 
