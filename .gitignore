@@ -1,0 +1,6 @@
+x64/
+libtorch/
+.vs/
+SFML-3.0.2/
+version/
+SurvivalGame/

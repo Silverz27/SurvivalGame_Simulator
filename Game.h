@@ -45,7 +45,7 @@ private:
     int            currentAction = 0;
 
     int actionRepeatCounter = 0;
-    static constexpr int ACTION_REPEAT = 6;
+    static constexpr int ACTION_REPEAT = 5;
 
     // Episode auto-reset
     void resetEpisode();

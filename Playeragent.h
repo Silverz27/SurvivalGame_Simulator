@@ -41,6 +41,13 @@ struct GameStateForAI {
     float danger_dir_x;
     float danger_dir_y;
     float danger_power_ratio;
+    // ── Wall sensors (CẢM BIẾN TƯỜNG) ─────────────────────────────────────────
+    float dist_top;    // 1.0 = Xa tường / 0.0 = Cộc đầu vào tường
+    float dist_bottom;
+    float dist_left;
+    float dist_right;
+
+   
 
     float last_known_food_dir_x = 0.f;
     float last_known_food_dir_y = 0.f;
@@ -51,14 +58,16 @@ struct GameStateForAI {
         return {
             hp_ratio, hunger_ratio, power / 100.f,
             food_dist, food_dir_x, food_dir_y,
-            food_in_view ? 1.f : 0.f,           
-            last_known_food_dir_x,               
+            food_in_view ? 1.f : 0.f,
+            last_known_food_dir_x,
             last_known_food_dir_y,
             near_enemy_dist, near_enemy_dir_x, near_enemy_dir_y, near_enemy_power_ratio,
-            danger_dist,     danger_dir_x,     danger_dir_y,     danger_power_ratio
+            danger_dist,     danger_dir_x,     danger_dir_y,     danger_power_ratio,
+            // Thêm 4 thông số cảm biến tường vào cuối mảng
+            dist_top, dist_bottom, dist_left, dist_right
         };
     }
-    static constexpr int DIM = 17;
+    static constexpr int DIM = 21;
 };
 
 // Direction vectors for each action index

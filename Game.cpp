@@ -74,7 +74,6 @@ void Game::processEvents()
         if (event->is<Event::Closed>()) window.close();
         if (const auto* k = event->getIf<Event::KeyPressed>()) {
             if (k->code == Keyboard::Key::Escape) window.close();
-            // Manual save / load shortcuts
             if (k->code == Keyboard::Key::F5 && agent)
                 agent->saveWeights("player_weights.pt");
             if (k->code == Keyboard::Key::F9 && agent)
@@ -95,7 +94,7 @@ GameStateForAI Game::buildState()
     s.hunger_ratio = player->getHunger() / Player::MAX_HUNGER;
     s.power = selfPower;
 
-    // ── Nearest food ──────────────────────────────────────────────────────────
+    // ── Nearest food ─────────────────────────────────────────────────────────
     Vector2f nearestFoodPos;
     float bestFoodDist = VIEW;
     for (const auto& f : foods) {
@@ -110,12 +109,11 @@ GameStateForAI Game::buildState()
         float dx = nearestFoodPos.x - pPos.x;
         float dy = nearestFoodPos.y - pPos.y;
         float len = std::sqrt(dx * dx + dy * dy);
-        if (len > 0.f) { dx /= len; dy /= len; } // cần lưu pos lại
+        if (len > 0.f) { dx /= len; dy /= len; }
         s.food_in_view = true;
         s.food_dir_x = dx;
         s.food_dir_y = dy;
         s.food_dist = bestFoodDist / VIEW;
-        // Update memory
         lastKnownFoodDir.x = dx;
         lastKnownFoodDir.y = dy;
         s.last_known_food_dir_x = dx;
@@ -126,7 +124,6 @@ GameStateForAI Game::buildState()
         s.food_dist = 1.f;
         s.food_dir_x = 0.f;
         s.food_dir_y = 0.f;
-        // Dùng hướng cuối cùng biết
         s.last_known_food_dir_x = lastKnownFoodDir.x;
         s.last_known_food_dir_y = lastKnownFoodDir.y;
     }
@@ -151,7 +148,6 @@ GameStateForAI Game::buildState()
             s.near_enemy_dir_y = dir.y;
             s.near_enemy_power_ratio = ratio;
         }
-        // Most dangerous = highest power in view
         if (e.getPower() > dangerPower && d < VIEW) {
             dangerPower = e.getPower();
             dangerDist = d;
@@ -162,7 +158,6 @@ GameStateForAI Game::buildState()
         }
     }
 
-    // Default to 1.0 (far away / not found)
     if (nearestDist >= VIEW) {
         s.near_enemy_dist = 1.f;
         s.near_enemy_power_ratio = 0.f;
@@ -170,6 +165,25 @@ GameStateForAI Game::buildState()
     if (dangerDist >= VIEW) {
         s.danger_dist = 1.f;
         s.danger_power_ratio = 0.f;
+    }
+
+    // ── Wall sensors – non-linear (sqrt) so the signal spikes sharply near walls
+    // sensor = sqrt( clamp(gap / WALL_VIEW, 0, 1) )
+    // → reads ~1.0 far away, drops steeply inside ~2×PLAYER_R of the wall.
+    {
+        constexpr float WALL_VIEW = 200.f;
+        constexpr float R = Player::RADIUS;
+
+        auto wallSensor = [&](float rawDist) -> float {
+            float gap = std::max(rawDist - R, 0.001f);   // body-edge to wall
+            float norm = std::min(gap / WALL_VIEW, 1.f);  // 0 = touching, 1 = far
+            return std::sqrt(norm);                        // non-linear: large gradient when close
+            };
+
+        s.dist_left = wallSensor(pPos.x);
+        s.dist_right = wallSensor(WORLD_W - pPos.x);
+        s.dist_top = wallSensor(pPos.y);
+        s.dist_bottom = wallSensor(WORLD_H - pPos.y);
     }
 
     return s;
@@ -185,13 +199,11 @@ void Game::update(float dt)
     if (AI_MODE && agent && !player->isDead()) {
         GameStateForAI state = buildState();
 
-        // Fill shaping info for reward calc
         ev.hunger_delta = player->getHunger() - prevHunger;
         ev.dist_to_food_delta = state.food_dist - prevFoodDist;
         prevHunger = player->getHunger();
         prevFoodDist = state.food_dist;
 
-        // Correct fleeing / chasing detection
         bool nearDanger = state.danger_power_ratio > 1.0f && state.danger_dist < 0.6f;
         bool nearWeak = state.near_enemy_power_ratio < 1.0f && state.near_enemy_dist < 0.6f;
 
@@ -202,16 +214,17 @@ void Game::update(float dt)
         else {
             actionRepeatCounter--;
         }
+
         Vector2f dir = actionToDir(currentAction);
         ev.player_pos = player->getPosition();
         ev.moved = (dir.x != 0.f || dir.y != 0.f);
-        player->move(dir * Player::SPEED * dt);  // bypass keyboard
+        player->move(dir * Player::SPEED * dt);
 
         // Did agent move away from danger?
         if (nearDanger) {
             Vector2f dangerDir(state.danger_dir_x, state.danger_dir_y);
             float dot = dir.x * dangerDir.x + dir.y * dangerDir.y;
-            ev.is_fleeing_correctly = (dot < -0.3f); // moved away
+            ev.is_fleeing_correctly = (dot < -0.3f);
         }
         // Did agent move toward weak enemy?
         if (nearWeak) {
@@ -238,6 +251,67 @@ void Game::update(float dt)
     if (AI_MODE && agent) {
         GameStateForAI nextState = buildState();
         float reward = rewardCalc.compute(ev);
+        // ==========================================
+        // THUẬT TOÁN CHỐNG KẸT GÓC/VIỀN (BẢN CHUẨN V-SHAPE CŨ)
+        // ==========================================
+        Vector2f pos = player->getPosition();
+        float margin = 80.f; // Khoảng cách 1 ô lưới sát biên
+
+        float penalty = -0.05f;       // Phạt cực nhẹ để AI không bị trầm cảm
+        float escape_reward = 0.5f;   // Thưởng vừa nếu lách khỏi viền đơn
+        float super_escape = 2.0f;    // SIÊU THƯỞNG nếu biết đi chéo thoát góc chữ V!
+
+        // Định nghĩa 8 hướng Action (từ 0 đến 7)
+        bool moving_left = (currentAction == 5 || currentAction == 6 || currentAction == 7);
+        bool moving_right = (currentAction == 1 || currentAction == 2 || currentAction == 3);
+        bool moving_up = (currentAction == 0 || currentAction == 1 || currentAction == 7);
+        bool moving_down = (currentAction == 3 || currentAction == 4 || currentAction == 5);
+
+        // Quét xem AI có đang chạm lề không
+        bool in_left_zone = (pos.x < margin);
+        bool in_right_zone = (pos.x > WORLD_W - margin);
+        bool in_top_zone = (pos.y < margin);
+        bool in_bottom_zone = (pos.y > WORLD_H - margin);
+
+        // 🏠 XỬ LÝ KẸT GÓC CHỮ V (Nhân đôi phạt nếu đâm bừa, thưởng siêu to nếu đi chéo)
+        if (in_left_zone && in_top_zone) {
+            if (currentAction == 3) reward += super_escape; // Thoát góc Trên-Trái: Đi Xuống-Phải
+            else if (moving_left || moving_up) reward += penalty * 2;
+        }
+        else if (in_right_zone && in_top_zone) {
+            if (currentAction == 5) reward += super_escape; // Thoát góc Trên-Phải: Đi Xuống-Trái
+            else if (moving_right || moving_up) reward += penalty * 2;
+        }
+        else if (in_left_zone && in_bottom_zone) {
+            if (currentAction == 1) reward += super_escape; // Thoát góc Dưới-Trái: Đi Lên-Phải
+            else if (moving_left || moving_down) reward += penalty * 2;
+        }
+        else if (in_right_zone && in_bottom_zone) {
+            if (currentAction == 7) reward += super_escape; // Thoát góc Dưới-Phải: Đi Lên-Trái
+            else if (moving_right || moving_down) reward += penalty * 2;
+        }
+        // 🚧 XỬ LÝ KẸT VIỀN ĐƠN 
+        else {
+            if (in_left_zone) {
+                if (moving_left) reward += penalty;
+                else if (moving_right) reward += escape_reward;
+            }
+            else if (in_right_zone) {
+                if (moving_right) reward += penalty;
+                else if (moving_left) reward += escape_reward;
+            }
+
+            if (in_top_zone) {
+                if (moving_up) reward += penalty;
+                else if (moving_down) reward += escape_reward;
+            }
+            else if (in_bottom_zone) {
+                if (moving_down) reward += penalty;
+                else if (moving_up) reward += escape_reward;
+            }
+        }
+        // ==========================================
+
         agent->observe(reward, done, nextState);
     }
 
@@ -281,7 +355,7 @@ void Game::render()
         line.setSize({ WORLD_W, 1.f }); line.setPosition({ 0, float(y) }); window.draw(line);
     }
 
-    // Draw view radius ring
+    // View radius ring
     if (AI_MODE) {
         CircleShape viewRing(PlayerAgent::VIEW_RADIUS);
         viewRing.setOrigin({ PlayerAgent::VIEW_RADIUS, PlayerAgent::VIEW_RADIUS });
@@ -354,7 +428,7 @@ void Game::drawUI()
 }
 
 // ── AI Overlay (top-right panel) ──────────────────────────────────────────────
-void Game::drawAIOverlay() 
+void Game::drawAIOverlay()
 {
     if (!agent) return;
     float x = WORLD_W - 320.f, y = 20.f;
@@ -366,7 +440,6 @@ void Game::drawAIOverlay()
         window.draw(tx);
         };
 
-    // Panel background
     RectangleShape panel({ 300.f, 140.f });
     panel.setPosition({ x - 8.f, y - 8.f });
     panel.setFillColor(Color(20, 25, 30, 200));
@@ -380,25 +453,68 @@ void Game::drawAIOverlay()
     label("Avg Ret : " + std::to_string(agent->getAvgReward()).substr(0, 6), 68, Color(100, 240, 140));
     label("Loss    : " + std::to_string(agent->getLastLoss()).substr(0, 6), 90, Color(240, 160, 80));
 
-    // Action label
     static const char* actionNames[8] = { "↑","↗","→","↘","↓","↙","←","↖" };
     label(std::string("Action  : ") + actionNames[currentAction], 112, Color(255, 220, 80));
 }
 
 // ── Spawn ─────────────────────────────────────────────────────────────────────
 void Game::spawnFood(int count) {
-    for (int i = 0; i < count; ++i) foods.emplace_back(randomPos());
+    int cols = 4;
+    int rows = 2;
+    int totalZones = cols * rows;
+    float zoneW = WORLD_W / cols;
+    float zoneH = WORLD_H / rows;
+    float margin = 40.f;
+
+    // BƯỚC 1: ĐIỀU TRA DÂN SỐ - Đếm xem mỗi vùng đang còn bao nhiêu thức ăn
+    std::vector<int> foodPerZone(totalZones, 0);
+    for (const auto& f : foods) {
+        if (f.eaten) continue;
+        Vector2f p = f.getPosition();
+        // Ép tọa độ X, Y về số thứ tự Cột và Hàng
+        int c = std::min(static_cast<int>(p.x / zoneW), cols - 1);
+        int r = std::min(static_cast<int>(p.y / zoneH), rows - 1);
+        foodPerZone[r * cols + c]++;
+    }
+
+    // BƯỚC 2: CỨU TRỢ CHÍNH XÁC - Vùng nào thiếu nhất thì bù vào vùng đó
+    for (int i = 0; i < count; ++i) {
+        // Tìm vùng có ít thức ăn nhất hiện tại
+        int minZone = 0;
+        for (int z = 1; z < totalZones; ++z) {
+            if (foodPerZone[z] < foodPerZone[minZone]) {
+                minZone = z;
+            }
+        }
+
+        // Tính tọa độ đất của vùng nghèo nhất (minZone)
+        int c = minZone % cols;
+        int r = minZone / cols;
+        float minX = c * zoneW + margin;
+        float maxX = (c + 1) * zoneW - margin;
+        float minY = r * zoneH + margin;
+        float maxY = (r + 1) * zoneH - margin;
+
+        // Sinh 1 hạt thức ăn vứt vào đúng vùng đó
+        float x = minX + static_cast<float>(std::rand()) / (static_cast<float>(RAND_MAX / (maxX - minX)));
+        float y = minY + static_cast<float>(std::rand()) / (static_cast<float>(RAND_MAX / (maxY - minY)));
+
+        foods.emplace_back(Vector2f(x, y));
+
+        // Cộng 1 vào vùng đó để vòng lặp sau (nếu có) nó đi tìm vùng khác
+        foodPerZone[minZone]++;
+    }
 }
 void Game::spawnEnemies(int count) {
     for (int i = 0; i < count; ++i) {
-        float p = 5.f + float(std::rand() % 50);
+        float p = 5.f + float(std::rand() % 26);
         enemies.emplace_back(randomPos(80.f), p);
     }
 }
 
 void Game::spawnEnemiesSafe()
 {
-    const float SAFE_RADIUS = 300.f; // không spawn enemy trong vòng này
+    const float SAFE_RADIUS = 300.f;
     Vector2f center = { WORLD_W / 2.f, WORLD_H / 2.f };
 
     int spawned = 0;
@@ -410,7 +526,7 @@ void Game::spawnEnemiesSafe()
             (pos.x - center.x) * (pos.x - center.x) +
             (pos.y - center.y) * (pos.y - center.y)
         );
-        if (d < SAFE_RADIUS) continue; // quá gần center, thử lại
+        if (d < SAFE_RADIUS) continue;
         float p = 5.f + float(std::rand() % 50);
         enemies.emplace_back(pos, p);
         ++spawned;
