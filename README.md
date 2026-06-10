@@ -6,7 +6,7 @@
 
 ## Giới thiệu
 
-**Survival Simulator AI** là một môi trường mô phỏng sinh tồn được xây dựng bằng **C++** và **SFML**, trong đó một tác tử AI (Agent) phải học cách tồn tại trong một thế giới liên tục thay đổi.
+**Survival Simulator AI** là một môi trường mô phỏng sinh tồn được xây dựng bằng **C++** và **SFML** 3.0, trong đó một tác tử AI (Agent) phải học cách sống sót trong môi trường liên tục thay đổi.
 
 Thay vì được lập trình sẵn các hành vi như:
 
@@ -92,7 +92,7 @@ Một Agent thành công cần học được các hành vi:
 
 ✅ Không mắc kẹt tại góc hoặc biên bản đồ
 
-✅ Tối đa hóa tuổi thọ của mỗi Episode
+✅ Tối đa hóa số steps của mỗi Episode
 
 ---
 
@@ -107,7 +107,7 @@ Một Agent thành công cần học được các hành vi:
 | Respawn Enemy        | 8 giây      |
 | Chế độ học           | PPO         |
 | Không gian hành động | 8 hướng     |
-| Tốc độ khung hình    | 60 FPS      |
+| Tốc độ khung hình    | 144 FPS      |
 
 ---
 
@@ -260,6 +260,12 @@ Người chơi điều khiển trực tiếp để kiểm thử gameplay.
 
 ---
 
+# Cách tải 
+
+* Tải từng file hoặc tải phiên bản release đã đươc up lên repo
+* Mở file SurvivalGame.sln bằng Visual Studio 2022 trở lên
+* Chỉnh chế độ Configuration thành Release sau đó tiến hành chạy game
+
 # Lưu và tải mô hình
 
 | Phím | Chức năng    |
@@ -297,40 +303,6 @@ Sau một số lượng Episode đủ lớn, Agent có thể hình thành các h
 * Duy trì sự sống trong thời gian dài
 
 Mà không cần được lập trình trực tiếp các quy tắc này.
-
----
-
-# Hướng phát triển
-
-Các tính năng dự kiến trong tương lai:
-
-* Multi-Agent Survival
-* Sinh sản và tiến hóa
-* Hệ sinh thái Predator–Prey
-* Fog of War
-* Memory-based Agent
-* Curriculum Learning
-* Genetic Algorithm
-* Population Based Training
-* Procedural World Generation
-
----
-
-# Mục tiêu nghiên cứu
-
-Dự án được phát triển nhằm trả lời câu hỏi:
-
-> Một Agent chỉ nhận Reward và Observation có thể tự học được các chiến lược sinh tồn phức tạp đến mức nào?
-
-Thông qua môi trường này, chúng tôi nghiên cứu khả năng xuất hiện của các hành vi như:
-
-* Tìm kiếm tài nguyên
-* Tránh nguy hiểm
-* Đánh giá rủi ro
-* Săn mồi cơ hội
-* Sinh tồn dài hạn
-
-mà không cần được lập trình thủ công.
 
 ---
 
