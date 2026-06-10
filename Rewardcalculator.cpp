@@ -1,1 +1,0 @@
-#include "Rewardcalculator.h"
